@@ -3,6 +3,7 @@ import numpy as np
 from typing import Dict, Any, List
 import logging
 from logging_config import ETLPipelineError
+import great_expectations as ge
 
 logger = logging.getLogger(__name__)
 
@@ -208,3 +209,110 @@ class DataQualityChecker:
                   (report['business_rules']['valid_records'] or 1)) * 100
         
         return max(0, min(score, 100))  # Ensure score is between 0-100
+
+    def validate_sales_data(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Validate sales data using Great Expectations.
+        
+        Args:
+            df (pd.DataFrame): Input DataFrame to validate
+            
+        Returns:
+            Dict[str, Any]: Validation results and metrics
+        """
+        try:
+            # Convert to Great Expectations DataFrame
+            ge_df = ge.from_pandas(df)
+            
+            # Basic column presence validation
+            required_columns = ['date', 'product_id', 'quantity', 'unit_price']
+            validation_results = []
+            
+            # Check required columns
+            for col in required_columns:
+                validation_results.append(
+                    ge_df.expect_column_to_exist(col)
+                )
+
+            # Data type validation
+            validation_results.extend([
+                ge_df.expect_column_values_to_be_of_type('date', 'datetime64'),
+                ge_df.expect_column_values_to_be_of_type('product_id', 'object'),
+                ge_df.expect_column_values_to_be_of_type('quantity', 'int64'),
+                ge_df.expect_column_values_to_be_of_type('unit_price', 'float64')
+            ])
+
+            # Value range validation
+            validation_results.extend([
+                ge_df.expect_column_values_to_be_between('quantity', 0, 10000),
+                ge_df.expect_column_values_to_be_between('unit_price', 0, 100000),
+                ge_df.expect_column_values_to_not_be_null('product_id'),
+                ge_df.expect_column_values_to_not_be_null('date')
+            ])
+
+            # Custom business rules
+            validation_results.extend([
+                ge_df.expect_column_values_to_match_regex('product_id', r'^P\d{3}$'),
+                ge_df.expect_column_values_to_be_between('discount', 0, 1)
+            ])
+
+            # Calculate validation metrics
+            success_count = sum(1 for result in validation_results if result.success)
+            total_checks = len(validation_results)
+            quality_score = (success_count / total_checks) * 100
+
+            # Prepare detailed report
+            failed_checks = [
+                {
+                    'check': result.expectation_config.expectation_type,
+                    'column': result.expectation_config.kwargs.get('column'),
+                    'details': result.result
+                }
+                for result in validation_results if not result.success
+            ]
+
+            validation_summary = {
+                'quality_score': quality_score,
+                'total_checks': total_checks,
+                'passed_checks': success_count,
+                'failed_checks': failed_checks,
+                'timestamp': pd.Timestamp.now()
+            }
+
+            logger.info(f"Data quality validation completed. Score: {quality_score:.2f}%")
+            return validation_summary
+
+        except Exception as e:
+            logger.error(f"Error during data quality validation: {str(e)}")
+            raise
+
+    def generate_quality_report(self, validation_results: Dict[str, Any]) -> str:
+        """
+        Generate a formatted quality report.
+        
+        Args:
+            validation_results (Dict[str, Any]): Results from validate_sales_data
+            
+        Returns:
+            str: Formatted report
+        """
+        report = [
+            "=== Data Quality Report ===",
+            f"Timestamp: {validation_results['timestamp']}",
+            f"Quality Score: {validation_results['quality_score']:.2f}%",
+            f"Total Checks: {validation_results['total_checks']}",
+            f"Passed Checks: {validation_results['passed_checks']}",
+            "\nFailed Checks:"
+        ]
+
+        if validation_results['failed_checks']:
+            for check in validation_results['failed_checks']:
+                report.extend([
+                    f"\nCheck: {check['check']}",
+                    f"Column: {check['column']}",
+                    f"Details: {check['details']}"
+                ])
+        else:
+            report.append("None - All checks passed!")
+
+        return "\n".join(report)

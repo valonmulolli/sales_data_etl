@@ -99,7 +99,7 @@ class DataValidator:
         ]
         
         type_checks = {
-            'product_id': int,
+            'product_id': str,  
             'quantity': int,
             'unit_price': float,
             'discount': float,

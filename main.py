@@ -2,11 +2,11 @@
 
 import logging
 import os
-from extract import SalesDataExtractor
+from extract import AdvancedSalesDataExtractor
 from transform import SalesDataTransformer
 from load import SalesDataLoader
 from models import init_database
-from logging_config import setup_logging, log_exception, ETLPipelineError
+from logging_config import configure_logging, log_exception, ETLPipelineError
 from data_validator import DataValidator
 from monitoring import SystemMonitor
 from data_quality_checks import DataQualityChecker
@@ -17,7 +17,7 @@ def main():
     """
     try:
         # Set up comprehensive logging
-        logger = setup_logging()
+        logger = configure_logging()
         logger.info("Starting Sales Data ETL pipeline")
         
         # Initialize monitoring system
@@ -39,55 +39,20 @@ def main():
         
         # Extract sales data
         logger.info("Starting data extraction")
-        try:
-            extractor = SalesDataExtractor()
-            csv_path = 'sales_data.csv'  # Use the filename directly
-            raw_sales_data = extractor.extract_from_csv(csv_path)
-        except FileNotFoundError:
-            logger.error(f"Sales data file not found: {csv_path}")
-            raise ETLPipelineError(
-                f"Sales data file not found: {csv_path}", 
-                error_code="EXTRACT_001"
-            )
-        except Exception as extract_error:
-            log_exception(logger, "Data extraction failed", extract_error)
-            raise ETLPipelineError(
-                "Unexpected error during data extraction", 
-                error_code="EXTRACT_002"
-            ) from extract_error
+        extractor = AdvancedSalesDataExtractor()
+        input_file = '/app/data/sales_data.csv'  # Absolute path in container
+        logger.info(f"Extracting data from CSV file: {input_file}")
+        raw_sales_data = extractor.extract('csv', input_file)
         
         # Validate input data
         logger.info("Validating input data")
-        try:
-            # Define required columns and their expected types
-            required_columns = ['date', 'order_date', 'product_id', 'quantity', 'unit_price', 'discount']
-            type_checks = {
-                'date': str,
-                'order_date': str,
-                'product_id': str,
-                'quantity': int,
-                'unit_price': float,
-                'discount': float
-            }
-            
-            # Validate the raw sales data
-            validated_sales_data = DataValidator.validate_dataframe(
-                raw_sales_data, 
-                required_columns, 
-                type_checks
-            )
-        except ETLPipelineError as validation_error:
-            log_exception(logger, "Data validation failed", validation_error)
-            raise
+        validator = DataValidator()
+        validated_sales_data = validator.validate_sales_data(raw_sales_data)
         
         # Transform data
         logger.info("Starting data transformation")
-        transformer = SalesDataTransformer(validated_sales_data)
-        transformed_data = transformer.clean_data()
-        transformed_data = transformer.transform_dates(['date'])
-        transformed_data = transformer.calculate_sales_metrics()
-        
-        daily_sales = transformer.aggregate_by_period()
+        transformer = SalesDataTransformer()
+        transformed_data = transformer.transform(validated_sales_data)
         
         # Perform data quality checks
         data_quality_report = DataQualityChecker.comprehensive_data_quality_check(transformed_data)
@@ -95,8 +60,7 @@ def main():
         # Log data quality metrics
         monitor.record_pipeline_metrics(
             records_processed=len(validated_sales_data),
-            transformed_data=transformed_data,
-            daily_sales=daily_sales
+            transformed_data=transformed_data
         )
 
         # Generate and log performance report
@@ -112,20 +76,10 @@ def main():
 
         # Load transformed data
         try:
-            loader = SalesDataLoader(transformed_data)
-            
-            # Load to database
-            loader.load_to_database()
-            
-            # Load to CSV
-            loader.load_to_csv()
-            
-            # Archive data
+            loader = SalesDataLoader()
+            loader.load_to_database(transformed_data)
+            loader.load_to_csv(transformed_data)
             loader.archive_data()
-            
-            # Save aggregated data
-            loader.load_to_csv(daily_sales, "daily_sales.csv")
-            
         except Exception as load_error:
             log_exception(logger, "Data loading failed", load_error)
             raise ETLPipelineError(

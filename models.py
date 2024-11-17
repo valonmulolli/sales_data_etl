@@ -2,10 +2,11 @@ import os
 import time
 import logging
 from datetime import datetime
+import pytz
 import socket
 
 import psycopg2
-from sqlalchemy import Column, Integer, String, Date, Numeric, DateTime, create_engine
+from sqlalchemy import Column, Integer, String, Date, Float, DateTime, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import OperationalError
@@ -24,10 +25,10 @@ class SalesRecord(Base):
     date = Column(Date, nullable=False)
     product_id = Column(Integer, nullable=False)
     quantity = Column(Integer, nullable=False)
-    unit_price = Column(Numeric(10, 2), nullable=False)
-    discount = Column(Numeric(5, 2), default=0.0)
-    total_sales = Column(Numeric(10, 2), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    unit_price = Column(Float, nullable=False)
+    discount = Column(Float, default=0.0)
+    total_sales = Column(Float, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(pytz.UTC))
 
     def __repr__(self):
         return (f"<SalesRecord(id={self.id}, date={self.date}, "

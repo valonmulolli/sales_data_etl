@@ -8,6 +8,7 @@ from models import SalesRecord, DatabaseConnection
 from datetime import datetime
 from typing import Dict, Any
 from config import TARGET_DATABASE, OUTPUT_PATH, BATCH_SIZE
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ class SalesDataLoader:
 
     def load_to_database(self, df: pd.DataFrame = None) -> None:
         """
-        Load sales data to PostgreSQL database.
+        Load sales data to PostgreSQL database with optimized performance.
         
         Args:
             df (pd.DataFrame, optional): DataFrame to load. Uses stored DataFrame if not provided.
@@ -71,32 +72,66 @@ class SalesDataLoader:
             if df is None:
                 df = self.df
             
-            # Create a database session
+            # Create a database session with optimized settings
             with self.db_connection.get_session() as session:
                 # Convert DataFrame to list of dictionaries for bulk insert
                 records = df.to_dict('records')
                 
-                # Bulk insert records
-                sales_records = [
-                    SalesRecord(
-                        date=pd.to_datetime(record['date']).date(),
-                        product_id=int(record['product_id'].replace('P', '')),  # Convert 'P001' to 1
-                        quantity=record['quantity'],
-                        unit_price=record['unit_price'],
-                        discount=record['discount'],
-                        total_sales=record['total_sales']
-                    ) for record in records
-                ]
+                # Prepare records with proper data types
+                sales_records = []
+                for record in records:
+                    try:
+                        sales_record = SalesRecord(
+                            date=pd.to_datetime(record['date']).date(),
+                            product_id=int(record['product_id'].replace('P', '')),
+                            quantity=record['quantity'],
+                            unit_price=record['unit_price'],
+                            discount=record['discount'],
+                            total_sales=record['total_sales']
+                        )
+                        sales_records.append(sales_record)
+                    except Exception as e:
+                        logger.error(f"Error processing record {record}: {str(e)}")
+                        continue
+
+                # Optimize batch size based on record size
+                optimal_batch_size = min(
+                    self.batch_size,
+                    max(1, int(1000000 / len(str(sales_records[0]))))
+                )
                 
-                # Add and commit records in batches
-                for i in range(0, len(sales_records), self.batch_size):
-                    batch = sales_records[i:i+self.batch_size]
-                    session.add_all(batch)
-                    session.commit()
+                total_records = len(sales_records)
+                processed_records = 0
+
+                # Add and commit records in optimized batches with progress tracking
+                for i in range(0, len(sales_records), optimal_batch_size):
+                    batch = sales_records[i:i + optimal_batch_size]
+                    try:
+                        session.bulk_save_objects(batch)
+                        session.commit()
+                        
+                        processed_records += len(batch)
+                        progress = (processed_records / total_records) * 100
+                        logger.info(f"Loading progress: {progress:.1f}% ({processed_records}/{total_records})")
+                        
+                    except Exception as e:
+                        session.rollback()
+                        logger.error(f"Error loading batch {i//optimal_batch_size + 1}: {str(e)}")
+                        raise
                 
-                self.logger.info(f"Successfully loaded {len(sales_records)} records to database")
+                # Perform ANALYZE on a separate connection
+                engine = self.db_connection.engine
+                with engine.connect() as connection:
+                    try:
+                        connection.execute(text('ANALYZE sales_records;'))
+                        logger.info("Database statistics updated successfully")
+                    except Exception as e:
+                        logger.warning(f"Could not update database statistics: {str(e)}")
+                
+                logger.info(f"Successfully loaded {processed_records} records to database")
+                
         except Exception as e:
-            self.logger.error(f"Error loading to database: {e}")
+            logger.error(f"Error loading to database: {str(e)}")
             raise
 
     def load_to_warehouse(self, df: pd.DataFrame = None, schema: str = None, table_name: str = None) -> None:
@@ -119,32 +154,35 @@ class SalesDataLoader:
 
     def archive_data(self, df: pd.DataFrame = None, archive_path: str = None) -> None:
         """
-        Archive processed data to a timestamped CSV file.
+        Archive processed data to a specified location.
         
         Args:
             df (pd.DataFrame, optional): DataFrame to archive. Uses stored DataFrame if not provided.
-            archive_path (str, optional): Path to archive directory. Uses default if not provided.
+            archive_path (str, optional): Custom archive path. Uses default if not provided.
         """
         try:
             # Use stored DataFrame if not provided
             if df is None:
                 df = self.df
             
-            # Use default archive path if not provided
+            # If no DataFrame is available, log a warning and return
+            if df is None:
+                logger.warning("No data available to archive")
+                return
+            
+            # Determine archive path
             if archive_path is None:
-                archive_path = os.path.join('data', 'archive')
+                archive_dir = os.path.join('data', 'archive')
+                os.makedirs(archive_dir, exist_ok=True)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                archive_file_path = os.path.join(archive_dir, f"sales_data_archive_{timestamp}.csv")
+            else:
+                archive_file_path = archive_path
             
-            # Create archive directory if it doesn't exist
-            os.makedirs(archive_path, exist_ok=True)
-            
-            # Generate timestamped filename
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            archive_filename = f"sales_data_archive_{timestamp}.csv"
-            archive_file_path = os.path.join(archive_path, archive_filename)
-            
-            # Save archived data
+            # Archive the data
             df.to_csv(archive_file_path, index=False)
-            self.logger.info(f"Successfully archived {len(df)} records to {archive_file_path}")
+            logger.info(f"Successfully archived {len(df)} records to {archive_file_path}")
+        
         except Exception as e:
-            self.logger.error(f"Error archiving data: {e}")
+            logger.error(f"Error archiving data: {str(e)}")
             raise

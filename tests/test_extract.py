@@ -1,13 +1,13 @@
 import pytest
 import pandas as pd
 import os
-from extract import SalesDataExtractor
+from extract import AdvancedSalesDataExtractor
 
 def test_extract_from_csv():
-    extractor = SalesDataExtractor()
+    extractor = AdvancedSalesDataExtractor()
     # Use absolute path to ensure correct file location
     csv_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'input', 'sales_data.csv')
-    df = extractor.extract_from_csv(csv_path)
+    df = extractor.extract(source_type='csv', source_identifier=csv_path)
     
     # Check basic properties
     assert not df.empty, "DataFrame should not be empty"
@@ -19,7 +19,7 @@ def test_extract_from_csv():
         assert col in df.columns, f"Column {col} is missing"
 
 def test_validate_input_data():
-    extractor = SalesDataExtractor()
+    extractor = AdvancedSalesDataExtractor()
     
     # Valid DataFrame
     valid_data = pd.DataFrame({
@@ -30,7 +30,7 @@ def test_validate_input_data():
     })
     
     try:
-        extractor.validate_input_data(valid_data)
+        extractor._validate_dataframe(valid_data)
     except ValueError:
         pytest.fail("Valid data should not raise ValueError")
     
@@ -40,8 +40,8 @@ def test_validate_input_data():
         'quantity': [10]
     })
     
-    with pytest.raises(ValueError, match="Input data is missing required columns"):
-        extractor.validate_input_data(invalid_data1)
+    with pytest.raises(ValueError, match="Missing required columns"):
+        extractor._validate_dataframe(invalid_data1)
     
     # Invalid DataFrame (non-numeric columns)
     invalid_data2 = pd.DataFrame({
@@ -51,5 +51,5 @@ def test_validate_input_data():
         'unit_price': [100.0]
     })
     
-    with pytest.raises(ValueError, match="Quantity column must contain numeric values"):
-        extractor.validate_input_data(invalid_data2)
+    with pytest.raises(ValueError, match="Invalid type for column quantity. Expected numeric"):
+        extractor._validate_dataframe(invalid_data2)

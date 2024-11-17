@@ -3,17 +3,21 @@ import logging.handlers
 import os
 from datetime import datetime
 
-def setup_logging(log_level=logging.INFO, log_dir='logs'):
+def configure_logging(log_level=logging.INFO, log_dir='logs'):
     """
     Configure comprehensive logging with rotation and multiple handlers.
     
     Args:
-        log_level (int): Logging level (default: logging.INFO)
+        log_level (str or int): Logging level (default: logging.INFO)
         log_dir (str): Directory to store log files
     
     Returns:
-        logging.Logger: Configured root logger
+        logging.Logger: Configured logger
     """
+    # Convert log_level to integer if it's a string
+    if isinstance(log_level, str):
+        log_level = getattr(logging, log_level.upper(), logging.INFO)
+
     # Ensure log directory exists
     os.makedirs(log_dir, exist_ok=True)
 
@@ -21,22 +25,23 @@ def setup_logging(log_level=logging.INFO, log_dir='logs'):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = os.path.join(log_dir, f'etl_pipeline_{timestamp}.log')
 
-    # Configure root logger
+    # Configure logging
     logging.basicConfig(
         level=log_level,
         format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
         handlers=[]  # We'll add custom handlers
     )
 
-    # Create root logger
-    root_logger = logging.getLogger()
-    root_logger.handlers.clear()  # Clear any existing handlers
+    # Create logger (use root logger if no name provided)
+    logger = logging.getLogger(__name__ if __name__ != '__main__' else '')
+    logger.handlers.clear()  # Clear any existing handlers
 
     # Console Handler
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
     console_formatter = logging.Formatter('%(asctime)s - %(levelname)s: %(message)s')
     console_handler.setFormatter(console_formatter)
+    logger.addHandler(console_handler)
 
     # File Handler with Rotation
     file_handler = logging.handlers.RotatingFileHandler(
@@ -49,16 +54,13 @@ def setup_logging(log_level=logging.INFO, log_dir='logs'):
         '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
     )
     file_handler.setFormatter(file_formatter)
-
-    # Add handlers to root logger
-    root_logger.addHandler(console_handler)
-    root_logger.addHandler(file_handler)
+    logger.addHandler(file_handler)
 
     # Log system information
-    root_logger.info(f"Logging initialized. Log file: {log_file}")
-    root_logger.info(f"Current working directory: {os.getcwd()}")
+    logger.info(f"Logging initialized. Log file: {log_file}")
+    logger.info(f"Current working directory: {os.getcwd()}")
 
-    return root_logger
+    return logger
 
 def log_exception(logger, message, exc_info=True):
     """

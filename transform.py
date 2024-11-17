@@ -1,126 +1,182 @@
-"""Module for transforming sales data."""
-
+from typing import Optional
 import pandas as pd
+import numpy as np
 import logging
-from typing import List
-from config import DATE_FORMAT
+from datetime import datetime
+from cache_manager import CacheManager
 
 logger = logging.getLogger(__name__)
 
 class SalesDataTransformer:
     """Class to handle transformation of sales data."""
     
-    def __init__(self, df: pd.DataFrame):
+    def __init__(self):
+        """Initialize the transformer with cache support."""
+        self.cache_manager = CacheManager(cache_dir='cache/transform')
+    
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Initialize the transformer with input DataFrame.
+        Apply all transformations to the sales data.
         
         Args:
-            df (pd.DataFrame): Input sales data
+            df (pd.DataFrame): Input DataFrame
+            
+        Returns:
+            pd.DataFrame: Transformed DataFrame
         """
-        self.df = df
-        self.date_format = DATE_FORMAT
-
-    def clean_data(self) -> pd.DataFrame:
+        # Check cache first
+        cached_result = self.cache_manager.cache_dataframe(df, 'full_transform')
+        if cached_result is not None:
+            return cached_result
+            
+        try:
+            # Apply transformations
+            df = self.clean_data(df)
+            df = self.validate_dates(df)
+            df = self.calculate_metrics(df)
+            df = self.standardize_columns(df)
+            
+            # Cache the result
+            self.cache_manager.save_dataframe(df.copy(), 'full_transform', df)
+            
+            return df
+        except Exception as e:
+            logger.error(f"Error in transform pipeline: {str(e)}")
+            raise
+    
+    def clean_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Clean the input DataFrame by removing duplicates and handling missing values.
+        Clean the sales data by handling missing values and outliers.
         
+        Args:
+            df (pd.DataFrame): Input DataFrame
+            
         Returns:
             pd.DataFrame: Cleaned DataFrame
         """
-        try:
-            logger.info("Starting data cleaning process")
+        # Check cache
+        cached_result = self.cache_manager.cache_dataframe(df, 'clean_data')
+        if cached_result is not None:
+            return cached_result
             
-            # Remove duplicates
-            initial_rows = len(self.df)
-            self.df = self.df.drop_duplicates()
-            logger.info(f"Removed {initial_rows - len(self.df)} duplicate rows")
+        try:
+            df = df.copy()
             
             # Handle missing values
-            self.df = self.df.fillna({
-                'quantity': 0,
-                'unit_price': 0,
-                'discount': 0
-            })
+            df['quantity'] = df['quantity'].fillna(0)
+            df['unit_price'] = df['unit_price'].fillna(df['unit_price'].mean())
+            df['discount'] = df['discount'].fillna(0)
             
-            return self.df
+            # Remove extreme outliers (beyond 3 standard deviations)
+            for col in ['quantity', 'unit_price', 'total_sales']:
+                mean = df[col].mean()
+                std = df[col].std()
+                df = df[np.abs(df[col] - mean) <= 3 * std]
+            
+            # Cache result
+            self.cache_manager.save_dataframe(df.copy(), 'clean_data', df)
+            
+            return df
         except Exception as e:
-            logger.error(f"Error during data cleaning: {str(e)}")
+            logger.error(f"Error in clean_data: {str(e)}")
             raise
-
-    def transform_dates(self, date_columns: List[str]) -> pd.DataFrame:
+    
+    def validate_dates(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Transform date columns to standard format.
+        Validate and standardize date formats.
         
         Args:
-            date_columns (List[str]): List of date column names to transform
-        
+            df (pd.DataFrame): Input DataFrame
+            
         Returns:
-            pd.DataFrame: DataFrame with transformed date columns
+            pd.DataFrame: DataFrame with validated dates
         """
+        # Check cache
+        cached_result = self.cache_manager.cache_dataframe(df, 'validate_dates')
+        if cached_result is not None:
+            return cached_result
+            
         try:
-            logger.info(f"Transforming date columns: {date_columns}")
+            df = df.copy()
             
-            for column in date_columns:
-                # Convert to datetime 
-                self.df[column] = pd.to_datetime(self.df[column], format=self.date_format)
+            # Convert dates to datetime
+            df['date'] = pd.to_datetime(df['date'])
             
-            return self.df
+            # Remove future dates
+            df = df[df['date'] <= datetime.now()]
+            
+            # Cache result
+            self.cache_manager.save_dataframe(df.copy(), 'validate_dates', df)
+            
+            return df
         except Exception as e:
-            logger.error(f"Error transforming dates: {str(e)}")
+            logger.error(f"Error in validate_dates: {str(e)}")
             raise
-
-    def calculate_sales_metrics(self) -> pd.DataFrame:
+    
+    def calculate_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Calculate additional sales metrics.
         
+        Args:
+            df (pd.DataFrame): Input DataFrame
+            
         Returns:
-            pd.DataFrame: DataFrame with added sales metrics
+            pd.DataFrame: DataFrame with additional metrics
         """
+        # Check cache
+        cached_result = self.cache_manager.cache_dataframe(df, 'calculate_metrics')
+        if cached_result is not None:
+            return cached_result
+            
         try:
-            logger.info("Calculating sales metrics")
+            df = df.copy()
             
-            # Calculate total sales with discount
-            self.df['total_sales'] = (
-                self.df['quantity'] * 
-                self.df['unit_price'] * 
-                (1 - self.df['discount'])
-            ).round(2)
+            # Calculate total sales if not present
+            if 'total_sales' not in df.columns:
+                df['total_sales'] = df['quantity'] * df['unit_price'] * (1 - df['discount'])
             
-            return self.df
+            # Calculate additional metrics
+            df['gross_sales'] = df['quantity'] * df['unit_price']
+            df['discount_amount'] = df['gross_sales'] * df['discount']
+            df['profit_margin'] = (df['total_sales'] - df['discount_amount']) / df['gross_sales']
+            
+            # Cache result
+            self.cache_manager.save_dataframe(df.copy(), 'calculate_metrics', df)
+            
+            return df
         except Exception as e:
-            logger.error(f"Error calculating sales metrics: {str(e)}")
+            logger.error(f"Error in calculate_metrics: {str(e)}")
             raise
-
-    def aggregate_by_period(self, period: str = 'D') -> pd.DataFrame:
+    
+    def standardize_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Aggregate sales data by specified time period.
+        Standardize column names and formats.
         
         Args:
-            period (str, optional): Aggregation period. Defaults to 'D' (daily).
-        
+            df (pd.DataFrame): Input DataFrame
+            
         Returns:
-            pd.DataFrame: Aggregated sales data
+            pd.DataFrame: DataFrame with standardized columns
         """
+        # Check cache
+        cached_result = self.cache_manager.cache_dataframe(df, 'standardize_columns')
+        if cached_result is not None:
+            return cached_result
+            
         try:
-            logger.info(f"Aggregating sales data by {period}")
+            df = df.copy()
             
-            # Group by date and aggregate
-            daily_sales = self.df.groupby(
-                pd.Grouper(key='date', freq=period)
-            ).agg({
-                'quantity': 'sum',
-                'total_sales': 'sum',
-                'product_id': 'nunique'
-            }).reset_index()
+            # Ensure consistent column names
+            df.columns = [col.lower().strip().replace(' ', '_') for col in df.columns]
             
-            daily_sales.columns = [
-                'period', 
-                'total_quantity', 
-                'total_revenue', 
-                'unique_products'
-            ]
+            # Round numeric columns
+            numeric_cols = df.select_dtypes(include=[np.number]).columns
+            df[numeric_cols] = df[numeric_cols].round(2)
             
-            return daily_sales
+            # Cache result
+            self.cache_manager.save_dataframe(df.copy(), 'standardize_columns', df)
+            
+            return df
         except Exception as e:
-            logger.error(f"Error aggregating sales data: {str(e)}")
+            logger.error(f"Error in standardize_columns: {str(e)}")
             raise
