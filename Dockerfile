@@ -1,35 +1,37 @@
 # Use an official Python runtime as a parent image
-FROM python:3.11-slim
+FROM python:3.12-slim
 
-# Set the working directory in the container
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+ENV PYTHONPATH=/app
+
+# Set work directory
 WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    build-essential \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy the current directory contents into the container at /app
-COPY . /app
+# Copy requirements file
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy project files
+COPY . .
 
 # Create directories for data and logs
-RUN mkdir -p /app/data/input /app/data/output /app/data/archive /app/logs
+RUN mkdir -p /app/data /app/logs
 
-# Upgrade pip and install dependencies
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+# Copy and make the entrypoint script executable
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PATH="/app:${PATH}"
+# Set the entrypoint
+ENTRYPOINT ["docker-entrypoint.sh"]
 
-# Make port 8000 available to the world outside this container (if you plan to add API later)
-EXPOSE 8000
-
-# Define volume for persistent data and logs
-VOLUME ["/app/data", "/app/logs"]
-
-# Run the ETL pipeline when the container launches
+# Default command (can be overridden)
 CMD ["python", "main.py"]
