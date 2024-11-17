@@ -1,0 +1,46 @@
+# Virtual Environment
+venv/
+*.venv
+env/
+.env/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Data files (optional, depending on your preference)
+*.csv
+data/input/*.csv
+data/output/*.csv
+data/archive/*.csv
+
+# Logs
+logs/
+*.log
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Sensitive Information
+*.env
+*.ini
+config.py  # If it contains sensitive info
+
+# Backup files
+*.bak
