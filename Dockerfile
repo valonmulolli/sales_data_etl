@@ -7,6 +7,7 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the current directory contents into the container at /app
@@ -15,8 +16,9 @@ COPY . /app
 # Create directories for data and logs
 RUN mkdir -p /app/data/input /app/data/output /app/data/archive /app/logs
 
-# Install any needed packages specified in requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+# Upgrade pip and install dependencies
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \

@@ -3,11 +3,18 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import os
-from dotenv import load_dotenv
+import logging
 from datetime import datetime
 
-# Load environment variables
-load_dotenv()
+# Configure logging
+logger = logging.getLogger(__name__)
+
+# Try to load environment variables
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    logger.warning("python-dotenv not installed. Using default or environment variables.")
 
 # Create a base class for declarative models
 Base = declarative_base()
@@ -43,7 +50,7 @@ class DatabaseConnection:
         return cls._instance
 
     def _init_connection(self):
-        # PostgreSQL connection string from environment variables
+        # PostgreSQL connection parameters with fallback defaults
         db_user = os.getenv('DB_USER', 'etl_user')
         db_password = os.getenv('DB_PASSWORD', 'etl_password')
         db_host = os.getenv('DB_HOST', 'localhost')
@@ -53,14 +60,20 @@ class DatabaseConnection:
         # Construct connection string
         connection_string = f'postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}'
         
-        # Create engine
-        self.engine = create_engine(connection_string, echo=False)
-        
-        # Create all tables
-        Base.metadata.create_all(self.engine)
-        
-        # Create session factory
-        self.Session = sessionmaker(bind=self.engine)
+        try:
+            # Create engine
+            self.engine = create_engine(connection_string, echo=False)
+            
+            # Create all tables
+            Base.metadata.create_all(self.engine)
+            
+            # Create session factory
+            self.Session = sessionmaker(bind=self.engine)
+            
+            logger.info("Database connection initialized successfully")
+        except Exception as e:
+            logger.error(f"Error initializing database connection: {e}")
+            raise
 
     def get_session(self):
         """
@@ -78,6 +91,10 @@ def init_database():
     """
     Initialize the database connection and create tables.
     """
-    db_connection = DatabaseConnection()
-    db_connection.create_tables()
-    return db_connection
+    try:
+        db_connection = DatabaseConnection()
+        db_connection.create_tables()
+        return db_connection
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+        raise
