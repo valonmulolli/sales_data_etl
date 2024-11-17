@@ -38,6 +38,7 @@ build/
 .ipynb_checkpoints
 
 # Sensitive Information
+.env  # Explicitly ignore .env file
 *.env
 *.ini
 config.py  # If it contains sensitive info

@@ -1,8 +1,11 @@
 """Module for loading transformed sales data into target destinations."""
 
-import pandas as pd
-import logging
 import os
+import logging
+import pandas as pd
+from sqlalchemy.orm import Session
+from models import SalesRecord, DatabaseConnection
+from datetime import datetime
 from typing import Dict, Any
 from config import TARGET_DATABASE, OUTPUT_PATH, BATCH_SIZE
 
@@ -16,6 +19,12 @@ class SalesDataLoader:
         self.target_config = TARGET_DATABASE
         self.output_path = OUTPUT_PATH
         self.batch_size = BATCH_SIZE
+        self.logger = logging.getLogger(__name__)
+        self.db_connection = DatabaseConnection()
+        
+        # Ensure output directories exist
+        os.makedirs(os.path.join('data', 'output'), exist_ok=True)
+        os.makedirs(os.path.join('data', 'archive'), exist_ok=True)
 
     def load_to_csv(self, df: pd.DataFrame, filename: str) -> None:
         """
@@ -26,42 +35,48 @@ class SalesDataLoader:
             filename (str): Name of the output file
         """
         try:
-            if not os.path.exists(self.output_path):
-                os.makedirs(self.output_path)
-                
-            output_file = os.path.join(self.output_path, filename)
-            logger.info(f"Saving data to CSV file: {output_file}")
-            
-            df.to_csv(output_file, index=False)
-            logger.info(f"Successfully saved {len(df)} records to {filename}")
+            output_path = os.path.join(self.output_path, filename)
+            df.to_csv(output_path, index=False)
+            self.logger.info(f"Successfully saved {len(df)} records to {output_path}")
         except Exception as e:
-            logger.error(f"Error saving data to CSV: {str(e)}")
+            self.logger.error(f"Error saving to CSV: {e}")
             raise
 
-    def load_to_database(self, df: pd.DataFrame, table_name: str) -> None:
+    def load_to_database(self, df: pd.DataFrame) -> None:
         """
-        Load data to target database.
+        Load sales data to PostgreSQL database.
         
         Args:
             df (pd.DataFrame): DataFrame to load
-            table_name (str): Name of the target table
         """
         try:
-            logger.info(f"Loading data to database table: {table_name}")
-            # Note: In production, use SQLAlchemy or other DB connector
-            # engine = create_engine(connection_string)
-            
-            # Load data in batches
-            total_rows = len(df)
-            for i in range(0, total_rows, self.batch_size):
-                batch = df[i:i + self.batch_size]
-                # batch.to_sql(table_name, engine, if_exists='append', index=False)
-                logger.info(f"Loaded batch {i//self.batch_size + 1}")
-            
-            logger.warning("Database loading not implemented yet")
+            # Start a database session
+            session = self.db_connection.get_session()
+
+            # Convert DataFrame to list of SQLAlchemy model instances
+            sales_records = []
+            for _, row in df.iterrows():
+                record = SalesRecord(
+                    date=row['date'],
+                    product_id=row['product_id'],
+                    quantity=row['quantity'],
+                    unit_price=row['unit_price'],
+                    discount=row.get('discount', 0.0),
+                    total_sales=row['quantity'] * row['unit_price'] * (1 - row.get('discount', 0.0))
+                )
+                sales_records.append(record)
+
+            # Bulk insert records
+            session.add_all(sales_records)
+            session.commit()
+
+            self.logger.info(f"Successfully loaded {len(sales_records)} records to database")
         except Exception as e:
-            logger.error(f"Error loading data to database: {str(e)}")
+            session.rollback()
+            self.logger.error(f"Error loading to database: {e}")
             raise
+        finally:
+            session.close()
 
     def load_to_warehouse(self, df: pd.DataFrame, schema: str, table_name: str) -> None:
         """
@@ -81,23 +96,32 @@ class SalesDataLoader:
             logger.error(f"Error loading data to warehouse: {str(e)}")
             raise
 
-    def archive_data(self, df: pd.DataFrame, archive_path: str) -> None:
+    def archive_data(self, df: pd.DataFrame, archive_path: str = None) -> None:
         """
         Archive processed data with timestamp.
         
         Args:
             df (pd.DataFrame): DataFrame to archive
-            archive_path (str): Path for archiving data
+            archive_path (str, optional): Custom archive path
         """
         try:
-            if not os.path.exists(archive_path):
-                os.makedirs(archive_path)
-                
-            timestamp = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
-            archive_file = os.path.join(archive_path, f'sales_data_{timestamp}.csv')
+            # Use default archive path if not provided
+            if archive_path is None:
+                archive_path = os.path.join('data', 'archive')
             
-            df.to_csv(archive_file, index=False, compression='gzip')
-            logger.info(f"Successfully archived data to {archive_file}")
+            # Create archive directory if it doesn't exist
+            os.makedirs(archive_path, exist_ok=True)
+            
+            # Generate filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            archive_filename = f"sales_data_{timestamp}.csv"
+            full_path = os.path.join(archive_path, archive_filename)
+            
+            # Save archived data
+            df.to_csv(full_path, index=False)
+            self.logger.info(f"Successfully archived {len(df)} records to {full_path}")
+            
+            return full_path
         except Exception as e:
-            logger.error(f"Error archiving data: {str(e)}")
+            self.logger.error(f"Error archiving data: {e}")
             raise

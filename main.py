@@ -7,6 +7,7 @@ from extract import SalesDataExtractor
 from transform import SalesDataTransformer
 from load import SalesDataLoader
 from config import LOG_FILE
+from models import init_database
 
 def setup_logging():
     """Set up logging configuration."""
@@ -31,6 +32,10 @@ def main():
         logger = logging.getLogger(__name__)
         logger.info("Starting Sales Data ETL pipeline")
         
+        # Initialize database
+        logger.info("Initializing database connection")
+        init_database()
+        
         # Initialize components
         extractor = SalesDataExtractor()
         transformer = SalesDataTransformer()
@@ -40,14 +45,16 @@ def main():
         logger.info("Starting data extraction")
         try:
             # Attempt to extract data from the invalid file
-            sales_data = extractor.extract_from_csv("invalid_sales_data.csv")
+            csv_path = os.path.join('data', 'input', 'invalid_sales_data.csv')
+            sales_data = extractor.extract_from_csv(csv_path)
         except ValueError as validation_error:
             # Log detailed validation error
             logger.error(f"Data validation failed: {validation_error}")
             
             # Optional: You could choose to use a default or fallback dataset here
             logger.info("Falling back to default sales data")
-            sales_data = extractor.extract_from_csv("sales_data.csv")
+            csv_path = os.path.join('data', 'input', 'sales_data.csv')
+            sales_data = extractor.extract_from_csv(csv_path)
         
         # Transform data
         logger.info("Starting data transformation")
@@ -68,6 +75,7 @@ def main():
         logger.info("Starting data loading")
         # Save detailed data
         loader.load_to_csv(sales_data, "processed_sales.csv")
+        loader.load_to_database(sales_data)  # New database loading method
         
         # Save aggregated data
         loader.load_to_csv(daily_sales, "daily_sales.csv")
