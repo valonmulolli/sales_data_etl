@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 import os
-from extract import AdvancedSalesDataExtractor
+from src.extract import AdvancedSalesDataExtractor
 
 def test_extract_from_csv():
     extractor = AdvancedSalesDataExtractor()

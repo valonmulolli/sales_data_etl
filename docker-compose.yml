@@ -1,3 +1,5 @@
+version: "3.8"
+
 services:
   postgres:
     image: postgres:15-alpine
@@ -10,16 +12,23 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
     networks:
       - etl_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-etl_user} -d ${POSTGRES_DB:-sales_db}"]
-      interval: 5s
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-etl_user} -d ${POSTGRES_DB:-sales_db}",
+        ]
+      interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
+    restart: unless-stopped
 
   etl_pipeline:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile
     container_name: sales_etl_pipeline
@@ -32,13 +41,41 @@ services:
       - DB_USER=${DB_USER:-etl_user}
       - DB_PASSWORD=${DB_PASSWORD:-etl_password}
       - DB_NAME=${DB_NAME:-sales_db}
+      - DATABASE_URL=postgresql://${DB_USER:-etl_user}:${DB_PASSWORD:-etl_password}@postgres:5432/${DB_NAME:-sales_db}
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - CACHE_ENABLED=${CACHE_ENABLED:-true}
+      - CACHE_TTL=${CACHE_TTL:-3600}
+      - DATA_SOURCE_PATH=/app/data/sample_sales_data.csv
+    ports:
+      - "8000:8000"
     volumes:
       - ./data:/app/data:rw
       - ./logs:/app/logs:rw
-      - ./alembic:/app/alembic:rw
-      - ./alembic.ini:/app/alembic.ini:ro
+      - ./reports:/app/reports:rw
+      - ./cache:/app/cache:rw
     networks:
       - etl_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Redis for caching (uncomment if needed)
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: sales_etl_redis
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+  #   networks:
+  #     - etl_network
+  #   restart: unless-stopped
 
 networks:
   etl_network:
@@ -47,3 +84,5 @@ networks:
 volumes:
   postgres_data:
     driver: local
+  # redis_data:
+  #   driver: local

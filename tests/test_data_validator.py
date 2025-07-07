@@ -1,8 +1,8 @@
 import pytest
 import pandas as pd
 import numpy as np
-from data_validator import DataValidator
-from logging_config import ETLPipelineError
+from src.data_validator import DataValidator
+from src.logging_config import ETLPipelineError
 
 def test_validate_dataframe_success():
     """Test successful DataFrame validation."""

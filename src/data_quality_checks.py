@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, Any, List
 import logging
-from logging_config import ETLPipelineError
+from .logging_config import ETLPipelineError
 import great_expectations as ge
 
 logger = logging.getLogger(__name__)
